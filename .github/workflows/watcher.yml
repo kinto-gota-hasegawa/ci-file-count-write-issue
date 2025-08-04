@@ -1,0 +1,104 @@
+name: Watcher
+
+on:
+  schedule:
+    - cron: '0 22 * * SUN'
+  workflow_dispatch:
+
+jobs:
+  count-ab-files:
+    runs-on: ubuntu-latest
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+        
+      - name: ABを含むファイル名を検索してカウント
+        id: count-files
+        run: |
+          files=$(find . -type f -exec grep -il "Cu" {} + | sort)
+          # files=$(find . -type f -path "*/layout/*" -exec grep -il "<layout" {} + | sort)
+          count=$(echo "$files" | wc -l)    
+          echo "file_count=$count" >> $GITHUB_OUTPUT
+          
+          # ファイルリストをMarkdown形式で保存
+          echo "# ABを含むファイル一覧" > ab_files_report.md
+          echo "" >> ab_files_report.md
+          echo "| No. | ファイルパス |" >> ab_files_report.md
+          echo "|-----|--------------|" >> ab_files_report.md
+          
+          if [ "$count" -gt 0 ]; then
+            i=1
+            echo "$files" | while IFS= read -r file; do
+              echo "| $i | ${file#./} |" >> ab_files_report.md
+              i=$((i + 1))
+            done
+          else
+            echo "| - | ABを含むファイルは見つかりませんでした |" >> ab_files_report.md
+          fi
+          
+          echo "" >> ab_files_report.md
+          echo "## 集計結果" >> ab_files_report.md
+          echo "" >> ab_files_report.md
+          echo "| 項目 | 値 |" >> ab_files_report.md
+          echo "|------|-----|" >> ab_files_report.md
+          echo "| 合計ファイル数 | $count |" >> ab_files_report.md
+          echo "| 実行日時 | $(date '+%Y年%m月%d日 %H:%M:%S') UTC |" >> ab_files_report.md
+          
+      - name: Issue作成用の本文を準備
+        id: prepare-issue
+        run: |
+          # レポートの内容を読み込み
+          report_content=$(cat ab_files_report.md)
+          
+          # マルチライン文字列として保存
+          {
+            echo "issue_body<<EOF"
+            echo "$report_content"
+            echo ""
+            echo "---"
+            echo "このレポートは自動生成されました。"
+            echo "実行ワークフロー: [AB Watcher](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          
+      - name: GitHubのIssueを作成
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `ABの残り一覧 - ${new Date().toISOString().split('T')[0]}`;
+            const body = `${{ steps.prepare-issue.outputs.issue_body }}`;
+            
+            // 既存の同じタイトルのIssueを検索
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ab-watcher'
+            });
+            
+            // 今日の日付が含まれるIssueがあれば更新、なければ新規作成
+            const todayStr = new Date().toISOString().split('T')[0];
+            const existingIssue = issues.data.find(issue => 
+              issue.title.includes(todayStr)
+            );
+            
+            if (existingIssue) {
+              // 既存のIssueを更新
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: body
+              });
+              console.log(`Updated existing issue #${existingIssue.number}`);
+            } else {
+              // 新しいIssueを作成
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['ab-watcher', 'automated']
+              });
+              console.log(`Created new issue #${issue.data.number}`);
+            }
