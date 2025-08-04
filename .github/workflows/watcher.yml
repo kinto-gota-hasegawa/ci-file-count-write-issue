@@ -42,7 +42,7 @@ jobs:
           echo "| 項目 | 値 |" >> ab_files_report.md
           echo "|------|-----|" >> ab_files_report.md
           echo "| 合計ファイル数 | $count |" >> ab_files_report.md
-          echo "| 実行日時 | $(date '+%Y年%m月%d日 %H:%M:%S') UTC |" >> ab_files_report.md
+          echo "| 実行日時 | $(TZ='Asia/Tokyo' date '+%Y年%m月%d日 %H:%M:%S') JST |" >> ab_files_report.md
           
       - name: Issue作成用の本文を準備
         id: prepare-issue
